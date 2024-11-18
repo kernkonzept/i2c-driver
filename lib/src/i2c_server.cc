@@ -1,9 +1,15 @@
+/*
+ * Copyright (C) 2024 Kernkonzept GmbH.
+ * Author(s): Philipp Eppelt philipp.eppelt@kernkonzept.com
+ *
+ * License: see LICENSE.spdx (in this directory or the directories above)
+ */
+
 #include <l4/sys/factory>
 #include <l4/sys/cxx/ipc_types>
 #include <l4/sys/cxx/ipc_epiface>
 #include <l4/re/util/object_registry>
 #include <l4/re/util/br_manager>
-#include <l4/re/util/debug>
 
 #include <l4/i2c-driver/i2c_server.h>
 #include <l4/i2c-driver/i2c_device_if.h>
@@ -18,8 +24,10 @@
 #include <climits>
 #include <cstring>
 #include <string>
+#include <cassert>
 
-using Dbg = L4Re::Util::Dbg;
+#include "debug.h"
+
 L4Re::Util::Err err(L4Re::Util::Err::Normal, "I2C Server");
 
 
@@ -70,10 +78,14 @@ class I2c_device : public L4::Epiface_t<I2c_device, I2c_device_ops>
 public:
   I2c_device(l4_uint16_t dev_addr, Controller_if *ctrl)
   : _ctrl(ctrl), _addr(dev_addr)
-  {}
+  {
+    assert(_ctrl);
+  }
   long op_read(I2c_device_ops::Rights, L4::Ipc::Array_ref<l4_uint8_t> &buf);
   long op_write(I2c_device_ops::Rights,
                 L4::Ipc::Array_ref<l4_uint8_t const> buf);
+
+  bool match(l4_uint16_t addr) const { return addr == _addr; }
 
 private:
   Controller_if *_ctrl;
@@ -83,15 +95,12 @@ private:
 long
 I2c_device::op_read(I2c_device_ops::Rights, L4::Ipc::Array_ref<l4_uint8_t> &buf)
 {
-  if (!_ctrl)
-    return -L4_ENOSYS;
-
   std::vector<l4_uint8_t> buffer(buf.length);
   long err = _ctrl->read(_addr, &buffer.front(), buf.length);
 
   if (err >= 0)
     {
-      memcpy(buf.data, &buffer.front(), buf.length);
+      memcpy(buf.data, buffer.data(), buf.length);
       return L4_EOK;
     }
   else
@@ -100,18 +109,21 @@ I2c_device::op_read(I2c_device_ops::Rights, L4::Ipc::Array_ref<l4_uint8_t> &buf)
 
 long
 I2c_device::op_write(I2c_device_ops::Rights,
-                     L4::Ipc::Array_ref<l4_uint8_t const> /*buf*/)
+                     L4::Ipc::Array_ref<l4_uint8_t const> buf)
 {
-  return -L4_ENOSYS;
+  std::vector<l4_uint8_t> buffer(buf.length);
+  memcpy(buffer.data(), buf.data, buf.length);
+
+  long err = _ctrl->write(_addr, &buffer.front(), buf.length);
+  return err;
 }
 
 
-template <typename SRV>
-class I2c_factory : public L4::Epiface_t<I2c_factory<SRV>, L4::Factory>
+class I2c_factory : public L4::Epiface_t<I2c_factory, L4::Factory>
 {
 public:
-  I2c_factory(std::shared_ptr<SRV> server, Controller_if *ctrl)
-  : _ctrl(ctrl), _server(server)
+  I2c_factory(L4Re::Util::Object_registry *registry, Controller_if *ctrl)
+  : _ctrl(ctrl), _registry(registry)
   {}
 
   /**
@@ -125,26 +137,40 @@ public:
                  l4_umword_t type, L4::Ipc::Varg_list<> &&args);
 
 private:
+  static Dbg warn() { return Dbg(Dbg::Warn, "Fab"); }
+  static Dbg trace() { return Dbg(Dbg::Trace, "Fab"); }
+
+  bool device_address_free(unsigned dev_addr) const;
   bool device_address_exists(unsigned dev_addr);
 
   Controller_if *_ctrl;
-  std::shared_ptr<SRV> _server;
+  L4Re::Util::Object_registry *_registry;
   std::vector<std::unique_ptr<I2c_device>> _devices;
 };
 
-template <typename SRV>
 bool
-I2c_factory<SRV>::device_address_exists(unsigned dev_addr)
+I2c_factory::device_address_free(unsigned dev_addr) const
+{
+  l4_uint16_t addr = dev_addr & 0xffff;
+
+  for (auto const &dev : _devices)
+    if (dev->match(addr))
+      return false;
+
+  return true;
+}
+
+bool
+I2c_factory::device_address_exists(unsigned dev_addr)
 {
   l4_uint8_t buf[1] = {0x0};
   long ret = _ctrl->write(dev_addr, buf, 1U);
   return ret != -L4_ENODEV || ret >= 0;
 }
 
-template <typename SRV>
 long
-I2c_factory<SRV>::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
-                            l4_umword_t type, L4::Ipc::Varg_list<> &&args)
+I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
+                       l4_umword_t type, L4::Ipc::Varg_list<> &&args)
 {
   printf("Received create request for type %lu\n", type);
   if (type != 0)
@@ -178,11 +204,14 @@ I2c_factory<SRV>::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
         }
     }
 
+  if (!device_address_free(dev_addr))
+    return -L4_EEXIST;
+
   if (!device_address_exists(dev_addr))
     return -L4_ENODEV;
 
   std::unique_ptr<I2c_device> i2c_dev = std::make_unique<I2c_device>(dev_addr, _ctrl);
-  auto device = _server->registry()->register_obj(i2c_dev.get());
+  auto device = _registry->register_obj(i2c_dev.get());
   if (!device)
     return -L4_EINVAL;
 
@@ -193,24 +222,26 @@ I2c_factory<SRV>::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
   return L4_EOK;
 }
 
-template <typename SRV>
-static std::tuple<L4::Cap<void>, std::unique_ptr<I2c_factory<SRV>>>
-init_factory(std::shared_ptr<SRV> server, char const *cap_name,
+static std::tuple<L4::Cap<void>, std::unique_ptr<I2c_factory>>
+init_factory(L4Re::Util::Object_registry *registry, char const *cap_name,
              Controller_if *ctrl)
 {
-  std::unique_ptr<I2c_factory<SRV>> factory =
-    std::make_unique<I2c_factory<SRV>>(server, ctrl);
+  Dbg warn(Dbg::Warn, "Fab");
+  Dbg trace(Dbg::Trace, "Fab");
 
-  L4::Cap<void> cap = server->registry()->register_obj(factory.get(), cap_name);
+  std::unique_ptr<I2c_factory> factory =
+    std::make_unique<I2c_factory>(registry, ctrl);
+
+  L4::Cap<void> cap = registry->register_obj(factory.get(), cap_name);
 
   if (!cap)
     {
-      Dbg().printf("Capability %s for factory interface not in capability table. No i2c devices can be connected.\n",
+      warn.printf("Capability %s for factory interface not in capability table. No i2c devices can be connected.\n",
                    cap_name);
       return std::make_tuple(cap, nullptr);
     }
   else
-    printf("factory cap 0x%lx\n", factory->obj_cap().cap());
+    trace.printf("factory cap 0x%lx\n", factory->obj_cap().cap());
 
 
   return std::make_tuple(cap, std::move(factory));
@@ -220,24 +251,29 @@ void start_server(Controller_if *ctrl)
 {
   using Reg_Server =
     L4Re::Util::Registry_server<L4Re::Util::Br_manager_timeout_hooks>;
+
+  Dbg warn(Dbg::Warn, "Srv");
+  Dbg trace(Dbg::Trace, "Srv");
+
   // use myself as server thread.
   auto server = std::make_shared<Reg_Server>(Pthread::L4::cap(pthread_self()),
                                              L4Re::Env::env()->factory());
 
   ctrl->setup(server->registry());
 
-  auto [factory_cap, factory] = init_factory(server, "dev_factory", ctrl);
+  auto [factory_cap, factory] =
+    init_factory(server->registry(), "dev_factory", ctrl);
 
   if (factory != nullptr)
     {
-      printf("factory initialized. start server loop\n");
+      trace.printf("factory initialized. start server loop\n");
       // start server loop to allow for factory connections.
       server->loop();
 
-      printf("exited server loop. Cleaning up ...\n");
+      warn.printf("exited server loop. Cleaning up ...\n");
       server->registry()->unregister_obj(factory.get());
       factory_cap.invalidate();
     }
   else
-    printf("Factory registration failed.\n");;
+    warn.printf("Factory registration failed.\n");;
 }
