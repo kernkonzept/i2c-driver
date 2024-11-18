@@ -5,9 +5,10 @@ L4DIR ?= $(PKGDIR)/../..
 TARGET	= lib_i2c_server.a
 
 # list your .c or .cc files here
-SRC_C	= 
-SRC_CC  =
+SRC_C	=
+SRC_CC  = i2c_server.cc
 
 PC_FILENAME = lib_i2c_server
+REQUIRES_LIBS = libstdc++
 
 include $(L4DIR)/mk/lib.mk
