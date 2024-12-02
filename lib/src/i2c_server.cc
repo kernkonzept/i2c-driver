@@ -10,6 +10,7 @@
 #include <l4/sys/cxx/ipc_epiface>
 #include <l4/re/util/object_registry>
 #include <l4/re/util/br_manager>
+#include <l4/l4virtio/server/virtio-i2c-device>
 
 #include <l4/i2c-driver/i2c_server.h>
 #include <l4/i2c-driver/i2c_device_if.h>
@@ -118,9 +119,60 @@ I2c_device::op_write(I2c_device_ops::Rights,
   return err;
 }
 
+class I2c_virtio_request_handler
+{
+public:
+  I2c_virtio_request_handler(Controller_if *ctrl, l4_uint16_t dev_addr)
+  : _ctrl(ctrl), _addr(dev_addr)
+  {}
+
+  ~I2c_virtio_request_handler() = default;
+
+  bool handle_read(l4_uint8_t *buf, unsigned len)
+  {
+    long err = _ctrl->read(_addr, buf, len);
+    if (err)
+      warn().printf("i2c-virtio-req::read: %li\n", err);
+    return err == L4_EOK;
+  }
+
+  bool handle_write(l4_uint8_t const *buf, unsigned len)
+  {
+    long err = _ctrl->write(_addr, buf, len);
+    if (err)
+      warn().printf("i2c-virtio-req::write: %li\n", err);
+    return err == L4_EOK;
+  }
+
+  bool match(l4_uint16_t addr) const { return addr == _addr; }
+
+private:
+  static Dbg warn() { return Dbg(Dbg::Warn, "ReqHdlr"); }
+  static Dbg trace() { return Dbg(Dbg::Trace, "ReqHdlr"); }
+
+  Controller_if *_ctrl;
+  l4_uint16_t _addr;
+};
+
+class I2c_virtio_device
+: public L4virtio::Svr::Virtio_i2c<I2c_virtio_request_handler>
+{
+public:
+  I2c_virtio_device(
+    I2c_virtio_request_handler *req_hdlr,
+    L4Re::Util::Object_registry *registry)
+  : Virtio_i2c(req_hdlr, registry)
+  {}
+};
 
 class I2c_factory : public L4::Epiface_t<I2c_factory, L4::Factory>
 {
+  enum Device_type
+  {
+    Type_virtio = 0,
+    Type_rpc = 1,
+  };
+
 public:
   I2c_factory(L4Re::Util::Object_registry *registry, Controller_if *ctrl)
   : _ctrl(ctrl), _registry(registry)
@@ -130,7 +182,7 @@ public:
    * Establish a connection to an i2c device.
    *
    * \param[out] res   Capability to access device.
-   * \param      type  Object protocol: 0
+   * \param      type  Object protocol: [0, 1]
    * \param      args  Arguments for device creation in order: i2c device address
    */
   long op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
@@ -145,7 +197,10 @@ private:
 
   Controller_if *_ctrl;
   L4Re::Util::Object_registry *_registry;
-  std::vector<std::unique_ptr<I2c_device>> _devices;
+  std::vector<std::tuple<std::unique_ptr<I2c_virtio_device>,
+                         std::unique_ptr<I2c_virtio_request_handler>>>
+    _devices_virtio;
+  std::vector<std::unique_ptr<I2c_device>> _devices_rpc;
 };
 
 bool
@@ -153,7 +208,11 @@ I2c_factory::device_address_free(unsigned dev_addr) const
 {
   l4_uint16_t addr = dev_addr & 0xffff;
 
-  for (auto const &dev : _devices)
+  for (auto const &[dev, hdlr] : _devices_virtio)
+      if (hdlr->match(addr))
+        return false;
+
+  for (auto const &dev : _devices_rpc)
     if (dev->match(addr))
       return false;
 
@@ -173,7 +232,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
                        l4_umword_t type, L4::Ipc::Varg_list<> &&args)
 {
   printf("Received create request for type %lu\n", type);
-  if (type != 0)
+  if (type > 1)
     return -L4_ENODEV;
 
   long unsigned dev_addr = 0;
@@ -210,14 +269,56 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
   if (!device_address_exists(dev_addr))
     return -L4_ENODEV;
 
-  std::unique_ptr<I2c_device> i2c_dev = std::make_unique<I2c_device>(dev_addr, _ctrl);
-  auto device = _registry->register_obj(i2c_dev.get());
-  if (!device)
-    return -L4_EINVAL;
+  L4::Cap<void> device_ep;
 
-  printf("Created device for addr %lu: %p\n", dev_addr, i2c_dev.get());
-  res = L4::Ipc::make_cap_rw(device);
-  _devices.push_back(std::move(i2c_dev));
+  switch (type)
+    {
+    case Type_virtio:
+      {
+        std::unique_ptr<I2c_virtio_request_handler> rqh =
+          std::make_unique<I2c_virtio_request_handler>(_ctrl, dev_addr);
+        if (!rqh)
+          return -L4_EINVAL;
+
+        std::unique_ptr<I2c_virtio_device> i2c_dev =
+          std::make_unique<I2c_virtio_device>(rqh.get(), _registry);
+        if (!i2c_dev)
+          return -L4_EINVAL;
+
+        device_ep = _registry->register_obj(i2c_dev.get());
+        if (!device_ep)
+          return -L4_EINVAL;
+
+        trace().printf("Created device for addr 0x%lx: %p\n", dev_addr,
+                       i2c_dev.get());
+
+        _devices_virtio.push_back(
+          std::make_tuple(std::move(i2c_dev), std::move(rqh)));
+        break;
+      }
+    case Type_rpc:
+      {
+        std::unique_ptr<I2c_device> i2c_dev =
+          std::make_unique<I2c_device>(dev_addr, _ctrl);
+
+        if (!i2c_dev)
+          return -L4_EINVAL;
+
+        device_ep = _registry->register_obj(i2c_dev.get());
+        if (!device_ep)
+          return -L4_EINVAL;
+
+        trace().printf("Created device for addr 0x%lx: %p\n", dev_addr,
+                       i2c_dev.get());
+
+        _devices_rpc.push_back(std::move(i2c_dev));
+        break;
+      }
+
+    default: return -L4_ENODEV;
+    }
+
+  res = L4::Ipc::make_cap_rw(device_ep);
 
   return L4_EOK;
 }
@@ -250,7 +351,7 @@ init_factory(L4Re::Util::Object_registry *registry, char const *cap_name,
 void start_server(Controller_if *ctrl)
 {
   using Reg_Server =
-    L4Re::Util::Registry_server<L4Re::Util::Br_manager_timeout_hooks>;
+    L4Re::Util::Registry_server<L4Re::Util::Br_manager_hooks>;
 
   Dbg warn(Dbg::Warn, "Srv");
   Dbg trace(Dbg::Trace, "Srv");
