@@ -82,3 +82,35 @@ I2C controller driver provides the following command line options:
 ## Supported hardware I2C controllers
 
  - BCM2835, BCM2711
+
+
+## device tree snippet for an virtio-i2c-device to use with uvmm
+
+This snippet can be used in a uvmm device tree. The `virtio_i2c` device node
+contains an `i2c` node, describing the bus with the `rtc@68` node as only
+device on this bus.
+The `0x68` value is the bus address of the DS3231 RTC device and `i2c_rtc` is
+the name of the capability to the i2c-driver.
+
+```dts
+virtio_i2c@16000 {
+        compatible = "virtio,mmio";
+        reg = <0 0xf1116000 0 0x200>;
+        interrupts = <0 129 4>;
+        l4vmm,vdev = "proxy";
+        l4vmm,virtiocap = "i2c_rtc";
+        status = "okay";
+
+        i2c {
+          compatible = "virtio,device22";
+
+          #size-cells = <1>;
+          #address-cells = <0>;
+
+          rtc@68 {
+            compatible = "maxim,ds3231";
+            reg = <0x68>;
+          };
+        };
+      };
+```
