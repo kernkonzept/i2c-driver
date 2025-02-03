@@ -7,6 +7,7 @@
 #pragma once
 
 #include <l4/cxx/bitfield>
+#include <l4/util/util.h>
 #include <l4/drivers/hw_mmio_register_block>
 
 #include "debug.h"
@@ -161,6 +162,39 @@ private:
   void start_transfer(l4_uint16_t addr, l4_uint16_t len, bool read, bool clear);
   bool finish_transfer();
 
+  long ensure_ta_start_or_fail(Status s)
+  {
+    for (int i = 0; i < 20 && !s.ta(); ++i)
+      {
+        // Busy wait in case the controller is slow
+        trace().printf("%s: transaction not started yet. Status 0x%x\n",
+                       __func__, s.raw);
+        s.update(this);
+      }
+
+    if (!s.ta())
+      {
+        // Give the slow controller more than enough time.
+        l4_sleep(1);
+        s.update(this);
+        if (!s.ta())
+          {
+            warn().printf("controller did not start transaction. Aborting. "
+                          "Status 0x%x\n", s.raw);
+
+            // Try to recover. Clear Status register.
+            s.done() = 1;
+            s.err() = 1;
+            s.clkt() = 1;
+            write32(Mmio_regs::S, s.raw);
+
+            return -L4_EIO;
+          }
+      }
+
+    return L4_EOK;
+  }
+
   void dump_ctrl_state()
   {
     // NOTE: This is a destructive read for the fifo register.
@@ -203,8 +237,8 @@ Ctrl_bcm2835::read(l4_uint16_t addr, l4_uint8_t *buf, unsigned len)
   start_transfer(addr, len, true, true);
 
   Status s(this);
-  while (!s.ta())
-    s.update(this);
+  if (long err = ensure_ta_start_or_fail(s); err < L4_EOK)
+    return err;
 
   if (s.err())
     {
@@ -248,6 +282,9 @@ Ctrl_bcm2835::write(l4_uint16_t addr, l4_uint8_t const *vals, unsigned len)
   start_transfer(addr, len, false, true);
 
   Status s(this);
+  if (long err = ensure_ta_start_or_fail(s); err < L4_EOK)
+    return err;
+
   if (s.err())
     {
       info().printf("Slave did not ack address 0x%x. Status 0x%x\n", addr, s.raw);
