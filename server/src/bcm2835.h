@@ -200,7 +200,7 @@ void Ctrl_bcm2835::setup(L4Re::Util::Object_registry *registry)
 long
 Ctrl_bcm2835::read(l4_uint16_t addr, l4_uint8_t *buf, unsigned len)
 {
-  start_transfer(addr, len, true, false);
+  start_transfer(addr, len, true, true);
 
   Status s(this);
   while (!s.ta())
