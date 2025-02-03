@@ -231,7 +231,7 @@ long
 I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
                        l4_umword_t type, L4::Ipc::Varg_list<> &&args)
 {
-  printf("Received create request for type %lu\n", type);
+  warn().printf("Received create request for type %lu\n", type);
   if (type > 1)
     return -L4_ENODEV;
 
