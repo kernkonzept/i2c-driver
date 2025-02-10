@@ -33,7 +33,7 @@ L4Re::Util::Err err(L4Re::Util::Err::Normal, "I2C Server");
 
 
 static bool
-parse_uint_optstring(char const *optstring, unsigned long *out)
+parse_uint_optstring(char const *optstring, unsigned int *out)
 {
   char *endp;
 
@@ -41,7 +41,7 @@ parse_uint_optstring(char const *optstring, unsigned long *out)
   unsigned long num = strtoul(optstring, &endp, 16);
 
   // check that long can be converted to int
-  if (errno || *endp != '\0' || num > ULONG_MAX)
+  if (errno || *endp != '\0' || num > UINT_MAX)
     return false;
 
   *out = num;
@@ -51,7 +51,7 @@ parse_uint_optstring(char const *optstring, unsigned long *out)
 
 static bool
 parse_uint_param(L4::Ipc::Varg const &param, char const *prefix,
-                 unsigned long *out)
+                 unsigned int *out)
 {
   l4_size_t headlen = strlen(prefix);
 
@@ -235,7 +235,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
   if (type > 1)
     return -L4_ENODEV;
 
-  long unsigned dev_addr = 0;
+  unsigned int dev_addr = 0;
   for (L4::Ipc::Varg const &arg : args)
     {
       if (!arg.is_of<char const *>())
