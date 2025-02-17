@@ -250,7 +250,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
             {
               if (dev_addr >= (1 << 7))
                 {
-                  err.printf("Requested device address %lu exceeds 7-bit "
+                  err.printf("Requested device address %u exceeds 7-bit "
                              "address range\n", dev_addr);
                   return -L4_EINVAL;
                 }
@@ -289,7 +289,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
         if (!device_ep)
           return -L4_EINVAL;
 
-        trace().printf("Created device for addr 0x%lx: %p\n", dev_addr,
+        trace().printf("Created device for addr 0x%x: %p\n", dev_addr,
                        i2c_dev.get());
 
         _devices_virtio.push_back(
@@ -308,7 +308,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
         if (!device_ep)
           return -L4_EINVAL;
 
-        trace().printf("Created device for addr 0x%lx: %p\n", dev_addr,
+        trace().printf("Created device for addr 0x%x: %p\n", dev_addr,
                        i2c_dev.get());
 
         _devices_rpc.push_back(std::move(i2c_dev));
