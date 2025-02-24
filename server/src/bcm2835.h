@@ -114,12 +114,12 @@ public:
   bool probe(L4::Cap<L4vbus::Vbus> vbus, L4::Cap<L4::Icu> icu) override;
   char const *name() override { return _compatible; }
 
-  void setup(L4Re::Util::Object_registry *registry);
+  void setup(L4Re::Util::Object_registry *registry) override;
   long read(l4_uint16_t addr, l4_uint8_t *buf, unsigned len) override;
-  long write(l4_uint16_t addr, l4_uint8_t const *vals, unsigned len);
+  long write(l4_uint16_t addr, l4_uint8_t const *vals, unsigned len) override;
 
   long write_read(l4_uint16_t addr, l4_uint8_t *write_buf, unsigned write_len,
-                  l4_uint8_t *read_buf, l4_uint8_t read_len)
+                  l4_uint8_t *read_buf, l4_uint8_t read_len) override
   {
     long ret = write(addr, write_buf, write_len);
     if (ret < 0)
