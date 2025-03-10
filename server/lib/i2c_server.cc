@@ -84,9 +84,13 @@ public:
   {
     assert(_ctrl);
   }
-  long op_read(I2c_device_ops::Rights, L4::Ipc::Array_ref<l4_uint8_t> &buf);
+  long op_read(I2c_device_ops::Rights, unsigned char len,
+               L4::Ipc::Array_ref<l4_uint8_t> &buf);
   long op_write(I2c_device_ops::Rights,
                 L4::Ipc::Array_ref<l4_uint8_t const> buf);
+  long op_write_read(I2c_device_ops::Rights,
+                     L4::Ipc::Array_ref<l4_uint8_t const> wbuf,
+                     unsigned char len, L4::Ipc::Array_ref<l4_uint8_t> &rbuf);
 
   bool match(l4_uint16_t addr) const { return addr == _addr; }
 
@@ -96,14 +100,15 @@ private:
 };
 
 long
-I2c_device::op_read(I2c_device_ops::Rights, L4::Ipc::Array_ref<l4_uint8_t> &buf)
+I2c_device::op_read(I2c_device_ops::Rights, unsigned char len,
+                    L4::Ipc::Array_ref<l4_uint8_t> &buf)
 {
-  std::vector<l4_uint8_t> buffer(buf.length);
-  long err = _ctrl->read(_addr, &buffer.front(), buf.length);
+  std::vector<l4_uint8_t> buffer(len);
+  long err = _ctrl->read(_addr, &buffer.front(), len);
 
   if (err >= 0)
     {
-      memcpy(buf.data, buffer.data(), buf.length);
+      memcpy(buf.data, buffer.data(), len);
       return L4_EOK;
     }
   else
@@ -114,11 +119,28 @@ long
 I2c_device::op_write(I2c_device_ops::Rights,
                      L4::Ipc::Array_ref<l4_uint8_t const> buf)
 {
-  std::vector<l4_uint8_t> buffer(buf.length);
-  memcpy(buffer.data(), buf.data, buf.length);
+  std::vector<l4_uint8_t> buffer(buf.data, buf.data + buf.length);
 
   long err = _ctrl->write(_addr, &buffer.front(), buf.length);
   return err;
+}
+
+long
+I2c_device::op_write_read(I2c_device_ops::Rights,
+                          L4::Ipc::Array_ref<l4_uint8_t const> wbuf,
+                          unsigned char len,
+                          L4::Ipc::Array_ref<l4_uint8_t> &rbuf)
+{
+  std::vector<l4_uint8_t> wbuffer(wbuf.data, wbuf.data + wbuf.length);
+  std::vector<l4_uint8_t> rbuffer(len);
+  long err = _ctrl->write_read(_addr, &wbuffer.front(), wbuf.length,
+                               &rbuffer.front(), len);
+
+  if (err < 0)
+    return err;
+
+  memcpy(rbuf.data, rbuffer.data(), len);
+  return L4_EOK;
 }
 
 class I2c_virtio_request_handler
