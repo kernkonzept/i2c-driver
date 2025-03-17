@@ -8,6 +8,7 @@
 
 #include <l4/re/util/debug>
 
+namespace I2c_server {
 
 class Dbg : public L4Re::Util::Dbg
 {
@@ -25,3 +26,4 @@ public:
   {}
 };
 
+} // namespace I2c_server

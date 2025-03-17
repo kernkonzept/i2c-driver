@@ -30,8 +30,9 @@
 
 #include "debug.h"
 
-L4Re::Util::Err err(L4Re::Util::Err::Normal, "I2C Server");
+namespace I2c_server {
 
+L4Re::Util::Err err(L4Re::Util::Err::Normal, "I2C Server");
 
 static bool
 parse_uint_optstring(char const *optstring, unsigned int *out)
@@ -385,3 +386,5 @@ void start_server(Controller_if *ctrl)
   else
     warn.printf("Factory registration failed.\n");;
 }
+
+} // namespace I2c_server

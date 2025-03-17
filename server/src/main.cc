@@ -87,7 +87,7 @@ int main(int argc, char **argv)
     }
 
 
-  std::thread server(start_server, __ctrl);
+  std::thread server(I2c_server::start_server, __ctrl);
   info.printf("Wait for server termination.\n");
   server.join();
 

@@ -14,7 +14,7 @@
 #include <cstdio>
 #include <vector>
 
-class Ctrl_base : public Controller_if
+class Ctrl_base : public I2c_server::Controller_if
 {
 public:
   Ctrl_base()

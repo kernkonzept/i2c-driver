@@ -8,4 +8,6 @@
 
 #include "i2c_controller_if.h"
 
+namespace I2c_server {
 void start_server(Controller_if *ctrl);
+}

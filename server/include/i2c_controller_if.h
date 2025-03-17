@@ -8,6 +8,8 @@
 
 #include <l4/re/util/object_registry>
 
+namespace I2c_server {
+
 /**
  * Interface for a i2c device to interact with its controller.
  */
@@ -20,3 +22,5 @@ struct Controller_if
                           l4_uint8_t *read_buf, l4_uint8_t read_len) = 0;
   virtual void setup(L4Re::Util::Object_registry *registry) = 0;
 };
+
+} // namespace I2c_server
