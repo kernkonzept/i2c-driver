@@ -12,9 +12,10 @@
 #include <l4/re/util/br_manager>
 #include <l4/l4virtio/server/virtio-i2c-device>
 
-#include <l4/i2c-driver/i2c_server.h>
 #include <l4/i2c-driver/i2c_device_if.h>
-#include <l4/i2c-driver/i2c_controller_if.h>
+
+#include <l4/i2c-driver/server/i2c_server.h>
+#include <l4/i2c-driver/server/i2c_controller_if.h>
 
 #include <pthread-l4.h>
 #include <memory>

@@ -10,7 +10,7 @@
 #include <l4/re/error_helper>
 #include <l4/sys/icu>
 
-#include <l4/i2c-driver/i2c_server.h>
+#include <l4/i2c-driver/server/i2c_server.h>
 
 #include <terminate_handler-l4>
 #include <getopt.h>

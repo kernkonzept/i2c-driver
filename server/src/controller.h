@@ -9,7 +9,7 @@
 #include <l4/vbus/vbus>
 #include <l4/sys/icu>
 #include <l4/re/error_helper>
-#include <l4/i2c-driver/i2c_controller_if.h>
+#include <l4/i2c-driver/server/i2c_controller_if.h>
 
 #include <cstdio>
 #include <vector>
