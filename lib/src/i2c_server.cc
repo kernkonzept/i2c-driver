@@ -128,16 +128,22 @@ public:
 
   ~I2c_virtio_request_handler() = default;
 
-  bool handle_read(l4_uint8_t *buf, unsigned len)
+  bool handle_read(l4_uint16_t addr, l4_uint8_t *buf, unsigned len)
   {
+    if (addr != _addr)
+      return false;
+
     long err = _ctrl->read(_addr, buf, len);
     if (err)
       warn().printf("i2c-virtio-req::read: %li\n", err);
     return err == L4_EOK;
   }
 
-  bool handle_write(l4_uint8_t const *buf, unsigned len)
+  bool handle_write(l4_uint16_t addr, l4_uint8_t const *buf, unsigned len)
   {
+    if (addr != _addr)
+      return false;
+
     long err = _ctrl->write(_addr, buf, len);
     if (err)
       warn().printf("i2c-virtio-req::write: %li\n", err);
