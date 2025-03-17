@@ -164,7 +164,7 @@ private:
 
   long ensure_ta_start_or_fail(Status s)
   {
-    for (int i = 0; i < 20 && !s.ta(); ++i)
+    for (int i = 0; i < 20 && (!s.ta() && !s.done()); ++i)
       {
         // Busy wait in case the controller is slow
         trace().printf("%s: transaction not started yet. Status 0x%x\n",
@@ -172,12 +172,12 @@ private:
         s.update(this);
       }
 
-    if (!s.ta())
+    if (!s.ta() && !s.done())
       {
-        // Give the slow controller more than enough time.
-        l4_sleep(1);
+        // Give the slow controller enough time.
+        l4_sleep(3);
         s.update(this);
-        if (!s.ta())
+        if (!s.ta() && !s.done())
           {
             warn().printf("controller did not start transaction. Aborting. "
                           "Status 0x%x\n", s.raw);
