@@ -20,7 +20,7 @@ public:
     Trace = 4,
   };
 
-  explicit Dbg(Verbosity v = Warn, char const *subsys = "")
+  explicit Dbg(Verbosity v = Warn, char const *subsys = nullptr)
   : L4Re::Util::Dbg(v, "i2c-drv", subsys)
   {}
 };
