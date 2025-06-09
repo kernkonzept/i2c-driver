@@ -206,12 +206,14 @@ private:
   void alloc_ctrl_resources(L4::Cap<L4vbus::Vbus> vbus, L4::Cap<L4::Icu> icu,
                             L4vbus::Device &dev, l4vbus_device_t &devinfo,
                             l4_addr_t &base, l4_addr_t &end,
-                            L4::Cap<L4::Irq> &irq, Dbg const &dbg);
+                            L4::Cap<L4::Irq> &irq, bool &unmask_at_irq,
+                            Dbg const &dbg);
 
   char const *_compatible = "brcm,bcm2835-i2c";
   L4drivers::Mmio_register_block<32> _regs;
   l4_addr_t _end;
   L4::Cap<L4::Irq> _irq;
+  bool _unmask_at_irq = false;
 };
 
 void Ctrl_bcm2835::setup(L4Re::Util::Object_registry *registry)
@@ -226,8 +228,8 @@ void Ctrl_bcm2835::setup(L4Re::Util::Object_registry *registry)
   write32(Mmio_regs::Clkt, 0U);
 
   registry->register_obj(this, _irq);
-  // TODO communicate this need from the vbus ICU.
-  L4Re::chkipc(_irq->unmask(), "Unmask IRQ\n");
+  if (_unmask_at_irq)
+    L4Re::chkipc(_irq->unmask(), "Unmask IRQ\n");
 }
 
 
@@ -394,6 +396,7 @@ Ctrl_bcm2835::alloc_ctrl_resources(L4::Cap<L4vbus::Vbus> vbus,
                                    l4vbus_device_t &devinfo,
                                    l4_addr_t &base, l4_addr_t &end,
                                    L4::Cap<L4::Irq> &irq,
+                                   bool &unmask_at_irq,
                                    Dbg const &dbg)
 {
   base = 0;
@@ -415,7 +418,7 @@ Ctrl_bcm2835::alloc_ctrl_resources(L4::Cap<L4vbus::Vbus> vbus,
           }
         case L4VBUS_RESOURCE_IRQ:
           {
-            alloc_irq_resource(icu, res, irq, dbg);
+            alloc_irq_resource(icu, res, irq, dbg, unmask_at_irq);
             break;
           }
         case L4VBUS_RESOURCE_GPIO:
@@ -463,7 +466,8 @@ Ctrl_bcm2835::probe(L4::Cap<L4vbus::Vbus> vbus, L4::Cap<L4::Icu> icu)
   info().printf("Found a %s device.\n", _compatible);
 
   l4_addr_t base = 0UL;
-  alloc_ctrl_resources(vbus, icu, dev, devinfo, base, _end, _irq, info());
+  alloc_ctrl_resources(vbus, icu, dev, devinfo, base, _end, _irq,
+                       _unmask_at_irq, info());
   _regs.set_base(base);
 
   info().printf("MMIO resource [0x%lx, 0x%lx]; IRQ %s\n", base, _end,

@@ -61,7 +61,7 @@ alloc_mem_resource(L4::Cap<L4vbus::Vbus> vbus, l4vbus_resource_t &res,
 
 static void
 alloc_irq_resource(L4::Cap<L4::Icu> icu, l4vbus_resource_t &res,
-                   L4::Cap<L4::Irq> &irq, Dbg const &dbg)
+                   L4::Cap<L4::Irq> &irq, Dbg const &dbg, bool &unmask_at_irq)
 {
   if (irq.is_valid())
     {
@@ -83,8 +83,8 @@ alloc_irq_resource(L4::Cap<L4::Icu> icu, l4vbus_resource_t &res,
   long ret = L4Re::chksys(l4_error(icu->bind(irq_num, irq_cap.get())),
                           "Bind interrupt to vbus ICU.");
 
-  bool irq_unmask_at_icu = ret == 1;
-  if (irq_unmask_at_icu)
+  unmask_at_irq = ret == 0;
+  if (!unmask_at_irq)
     icu->unmask(irq_num);
   //  FIXME this is somehow a blocking call.
   //            else
@@ -93,5 +93,5 @@ alloc_irq_resource(L4::Cap<L4::Icu> icu, l4vbus_resource_t &res,
   irq = irq_cap.release();
   dbg.printf("Found IRQ resource [0x%lx, 0x%lx] (sz=%lu) unmask at %s\n",
              res.start, res.end, res.end - res.start + 1,
-             irq_unmask_at_icu ? "ICU" : "IRQ");
+             unmask_at_irq ? "IRQ" : "ICU");
 }
