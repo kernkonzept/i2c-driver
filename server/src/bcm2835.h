@@ -14,7 +14,9 @@
 #include "controller.h"
 #include "util.h"
 
-class Ctrl_bcm2835 : public Ctrl_base, public L4::Irqep_t<Ctrl_bcm2835>
+#include <thread-l4>
+
+class Ctrl_bcm2835 : public Ctrl_base
 {
   struct Control
   {
@@ -126,19 +128,6 @@ public:
       return ret;
     return read(addr, read_buf, read_len);
   }
-  void handle_irq()
-  {
-    // read status
-    //  either
-    //    clear done
-    //  or
-    //    initiate fifo read
-    //  or
-    //    fifo write depending on control.read
-    //
-    trace().printf("HANDLE IRQ\n");
-    clear_int_done(Status(this));
-  }
 
 private:
   static Dbg warn() { return Dbg(Dbg::Warn, "BCM2835"); }
@@ -157,42 +146,41 @@ private:
     _regs.write<l4_uint32_t>(val, reg);
   }
 
-  void clear_err(Status s);
-  void clear_int_done(Status s);
-  void start_transfer(l4_uint16_t addr, l4_uint16_t len, bool read, bool clear);
-  bool finish_transfer();
-
-  long ensure_ta_start_or_fail(Status s)
+  unsigned wfi()
   {
-    for (int i = 0; i < 20 && (!s.ta() && !s.done()); ++i)
+    static l4_timeout_t timeout_100ms =
+      l4_timeout(l4_timeout_from_us(100'000), l4_timeout_from_us(100'000));
+
+    unsigned err = l4_ipc_error(_irq->receive(timeout_100ms), l4_utcb());
+    if (err)
       {
-        // Busy wait in case the controller is slow
-        trace().printf("%s: transaction not started yet. Status 0x%x\n",
-                       __func__, s.raw);
-        s.update(this);
+        long errn = l4_ipc_to_errno(err);
+        warn().printf("Error during wait for interrupt: %s (%li)\n",
+                      l4sys_errtostr(errn), errn);
       }
 
-    if (!s.ta() && !s.done())
-      {
-        // Give the slow controller enough time.
-        l4_sleep(3);
-        s.update(this);
-        if (!s.ta() && !s.done())
-          {
-            warn().printf("controller did not start transaction. Aborting. "
-                          "Status 0x%x\n", s.raw);
+    return err;
+  }
 
-            // Try to recover. Clear Status register.
-            s.done() = 1;
-            s.err() = 1;
-            s.clkt() = 1;
-            write32(Mmio_regs::S, s.raw);
+  long process_irq_read(l4_uint8_t *buf, unsigned buflen, unsigned &byte_count);
+  long process_irq_write(l4_uint8_t const *buf, unsigned buflen,
+                         unsigned &byte_count);
 
-            return -L4_EIO;
-          }
-      }
+  bool has_status_error(Status s) const;
+  void start_transfer(l4_uint16_t addr, l4_uint16_t len, bool read, bool clear);
+  void finish_transfer();
 
-    return L4_EOK;
+  void error_handler()
+  {
+    Status s(this);
+    s.done() = 1;
+    s.err() = 1;
+    s.clkt() = 1;
+    write32(Mmio_regs::S, s.raw);
+
+    Control c(this);
+    c.clear();
+    write32(Mmio_regs::C, c.raw);
   }
 
   void dump_ctrl_state()
@@ -216,66 +204,138 @@ private:
   bool _unmask_at_irq = false;
 };
 
-void Ctrl_bcm2835::setup(L4Re::Util::Object_registry *registry)
+void Ctrl_bcm2835::setup(L4Re::Util::Object_registry *)
 {
+  L4Re::chksys(_irq->bind_thread(Pthread::L4::cap(pthread_self()), 0xc00ffee),
+               "Failed to bind to controller IRQ to thread.");
+
   Control c(this);
   c.i2c_en() = 1;
-//  c.intd() = 1;  // XXX enable interrupt on DONE
+  c.intr() = 1;  // enable interrupt on RXR
+  c.intt() = 1;  // enable interrupt on TXW
+  c.intd() = 1;  // enable interrupt on DONE
   c.clear() = 1;
   write32(Mmio_regs::C, c.raw);
 
   // TODO should we use this? linux sets it to zero/disabled.
   write32(Mmio_regs::Clkt, 0U);
 
-  registry->register_obj(this, _irq);
   if (_unmask_at_irq)
     L4Re::chkipc(_irq->unmask(), "Unmask IRQ\n");
 }
 
+bool
+Ctrl_bcm2835::has_status_error(Status s) const
+{
+  if (s.err() || s.clkt())
+    {
+      info().printf("Slave error: %s (status 0x%x)\n",
+                    s.err() ? "address not ack'd"
+                            : (s.clkt() ? "clock strech timeout" : "none"),
+                    s.raw);
+      return true;
+    }
+
+  return false;
+}
+
+
+long
+Ctrl_bcm2835::process_irq_read(l4_uint8_t *buf, unsigned buflen,
+                               unsigned &byte_count)
+{
+  Status s(this);
+  if (has_status_error(s))
+    {
+      error_handler();
+      return -L4_EIO;
+    }
+
+  if (s.done())
+    {
+      while (byte_count < buflen && s.rxd())
+        {
+          buf[byte_count++] = read32(Mmio_regs::Fifo);
+          s.update(this);
+        }
+      if (byte_count == buflen)
+        return L4_EOK;
+
+      printf("More data expected (cnt: %u, buflen %u), but FIFO empty: "
+             "status 0x%x\n",
+             byte_count, buflen, s.raw);
+      return -L4_EIO;
+    }
+  else if (s.rxr())
+    {
+      // read fifo
+      while (byte_count < buflen && s.rxd())
+        {
+          buf[byte_count++] = read32(Mmio_regs::Fifo);
+          s.update(this);
+        }
+
+      return -L4_EAGAIN;
+    }
+  else
+    {
+      printf("unknown interrupt reason during read. Ignoring. 0x%x\n", s.raw);
+      return -L4_EAGAIN;
+    }
+}
 
 long
 Ctrl_bcm2835::read(l4_uint16_t addr, l4_uint8_t *buf, unsigned len)
 {
   start_transfer(addr, len, true, true);
 
-  Status s(this);
-  if (long err = ensure_ta_start_or_fail(s); err < L4_EOK)
-    return err;
-
-  if (s.err())
+  unsigned processed_bytes = 0;
+  while (true)
     {
-      info().printf("Slave did not ack address 0x%x. Status 0x%x\n", addr, s.raw);
-      clear_err(s);
-      return -L4_ENODEV;
-    }
-
-  unsigned cnt = 0;
-  while (cnt < len)
-    {
-      s.update(this);
-
-      // fifo reads are invalid if there is no data to read.
-      while (!s.rxd() && !s.err() && !s.clkt() && !s.done())
-        s.update(this);
-
-      if (s.err() || s.clkt())
-          break;
-
-      if (!s.rxd() && s.done())
+      if (wfi())
         {
-          info().printf("RXD clear and no more data to transmit. stop read at "
-                        "cnt %u\n", cnt);
-          break;
+          error_handler();
+          return -L4_EIO;
         }
 
-      buf[cnt++] = read32(Mmio_regs::Fifo);
+      long ret = process_irq_read(buf, len, processed_bytes);
+      if (ret != -L4_EAGAIN)
+        {
+          finish_transfer();
+          return ret;
+        }
+    }
+}
+
+long
+Ctrl_bcm2835::process_irq_write(l4_uint8_t const *buf, unsigned buflen,
+                                unsigned &byte_count)
+{
+  Status s(this);
+  if (has_status_error(s))
+    {
+      error_handler();
+      return -L4_EIO;
     }
 
-  bool err = finish_transfer();
-  if (err)
-    info().printf("Transfer finished with error\n");
+  if (s.done())
+    return L4_EOK;
+  else if(s.txw())
+    {
+      // fill fifo
+      while (byte_count < buflen && s.txd())
+        {
+          write32(Mmio_regs::Fifo, buf[byte_count++]);
+          s.update(this);
+        }
 
-  return L4_EOK;
+      return -L4_EAGAIN;
+    }
+  else
+    {
+      printf("unknown interrupt reason during write. Ignoring. 0x%x\n", s.raw);
+      return -L4_EAGAIN;
+    }
 }
 
 long
@@ -283,60 +343,23 @@ Ctrl_bcm2835::write(l4_uint16_t addr, l4_uint8_t const *vals, unsigned len)
 {
   start_transfer(addr, len, false, true);
 
-  Status s(this);
-  if (long err = ensure_ta_start_or_fail(s); err < L4_EOK)
-    return err;
-
-  if (s.err())
+  unsigned processed_bytes = 0;
+  while (true)
     {
-      info().printf("Slave did not ack address 0x%x. Status 0x%x\n", addr, s.raw);
-      clear_err(s);
-      return -L4_ENODEV;
-    }
-
-  unsigned cnt = 0;
-  do
-    {
-      for (; cnt < len; ++cnt)
+      if (wfi())
         {
-          s.update(this);
-          if (s.txd() == 0)
-            {
-              trace().printf("TX FIFO full...\n");
-              break;
-            }
-
-          write32(Mmio_regs::Fifo, vals[cnt]);
+          error_handler();
+          return -L4_EIO;
         }
 
-      while (!s.txd() && !s.err() && !s.clkt() && !s.done())
-        s.update(this);
+      long ret = process_irq_write(vals, len, processed_bytes);
 
-      if (s.err() || s.clkt())
-          break;
-
-      if (!s.txd() && s.done())
+      if (ret != -L4_EAGAIN)
         {
-          info().printf("TX FIFO full and transfer flagged as done, before all "
-                        "data was transmitted. Status: 0x%x, cnt %u, len %u\n",
-                        s.raw, cnt, len);
-          break;
+          finish_transfer();
+          return ret;
         }
     }
-  while (cnt < len);
-
-  bool err = finish_transfer();
-  if (err)
-    info().printf("Transfer finished with error\n");
-
-  return L4_EOK;
-}
-
-void Ctrl_bcm2835::clear_int_done(Status s)
-{
-  // write 1 to S.done
-  s.done() = 1;
-  write32(Mmio_regs::S, s.raw);
 }
 
 void
@@ -356,36 +379,19 @@ Ctrl_bcm2835::start_transfer(l4_uint16_t addr, l4_uint16_t len, bool read,
   write32(Mmio_regs::C, c.raw);
 }
 
-bool
+void
 Ctrl_bcm2835::finish_transfer()
 {
   Status s(this);
-  trace().printf("Wait for transfer ...\n");
-  // wait until transfer is flagged as done.
-  while (s.ta() && !s.done() && !s.err() && !s.clkt())
-    s.update(this);
-  trace().printf("... done. Status 0x%x\n", s.raw);
-
   if (s.err())
     info().printf("Slave address error flagged. Status 0x%x\n", s.raw);
   if (s.clkt())
     info().printf("Slave strechted clock timeout too far. Status: 0x%x\n",
                   s.raw);
 
-  bool err_or_clkt = s.err() || s.clkt();
-
   s.done() = 1;
   s.err() = 1;
   s.clkt() = 1;
-  write32(Mmio_regs::S, s.raw);
-
-  return err_or_clkt;
-}
-
-void Ctrl_bcm2835::clear_err(Status s)
-{
-  // write 1 to S.err
-  s.err() = 1;
   write32(Mmio_regs::S, s.raw);
 }
 
