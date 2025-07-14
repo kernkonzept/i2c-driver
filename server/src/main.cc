@@ -23,8 +23,13 @@
 #include "imx8.h"
 
 // List of all supported controllers
+#ifdef CONFIG_RPI4
 static Ctrl_bcm2835 __bcm2835;
+#endif
+
+#ifdef CONFIG_IMX8
 static Imx8::Ctrl_imx8 __imx8;
+#endif
 
 // Pointer to active controller
 static Ctrl_base *__ctrl;
