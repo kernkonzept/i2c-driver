@@ -203,10 +203,30 @@ class I2c_factory : public L4::Epiface_t<I2c_factory, L4::Factory>
     Type_rpc = 1,
   };
 
+  struct Del_irq : L4::Irqep_t<Del_irq>
+  {
+    explicit Del_irq(I2c_factory *p)
+    : _p{p} {}
+
+    void handle_irq()
+    { _p->check_clients(); }
+
+  private:
+    I2c_factory *_p;
+  };
+
 public:
   I2c_factory(L4Re::Util::Object_registry *registry, Controller_if *ctrl)
-  : _ctrl(ctrl), _registry(registry)
-  {}
+  : _ctrl(ctrl), _registry(registry), _del_irq(this)
+  {
+    auto c = L4Re::chkcap(_registry->register_irq_obj(&_del_irq));
+    L4Re::chksys(Pthread::L4::cap(pthread_self())->register_del_irq(c));
+  }
+
+  ~I2c_factory()
+  {
+    _registry->unregister_obj(&_del_irq);
+  }
 
   /**
    * Establish a connection to an i2c device.
@@ -225,8 +245,39 @@ private:
   bool device_address_free(unsigned dev_addr) const;
   bool device_address_exists(unsigned dev_addr);
 
+  void check_clients()
+  {
+    check_virtio_clients();
+    check_rpc_clients();
+  }
+
+  void check_virtio_clients()
+  {
+    auto it = _devices_virtio.begin();
+    while (it != _devices_virtio.end())
+      {
+        if (std::get<0>(*it)->obj_cap().validate().label() == 0)
+          it = _devices_virtio.erase(it);
+        else
+          ++it;
+      }
+  }
+
+  void check_rpc_clients()
+  {
+    auto it = _devices_rpc.begin();
+    while (it != _devices_rpc.end())
+      {
+        if ((*it)->obj_cap().validate().label() == 0)
+          it = _devices_rpc.erase(it);
+        else
+          ++it;
+      }
+  }
+
   Controller_if *_ctrl;
   L4Re::Util::Object_registry *_registry;
+  Del_irq _del_irq;
   std::vector<std::tuple<std::unique_ptr<I2c_virtio_device>,
                          std::unique_ptr<I2c_virtio_request_handler>>>
     _devices_virtio;
@@ -351,6 +402,7 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
     default: return -L4_ENODEV;
     }
 
+  L4::cap_cast<L4::Kobject>(device_ep)->dec_refcnt(1);
   res = L4::Ipc::make_cap_rw(device_ep);
 
   return L4_EOK;
