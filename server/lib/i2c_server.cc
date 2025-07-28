@@ -293,6 +293,9 @@ I2c_factory::op_create(L4::Factory::Rights, L4::Ipc::Cap<void> &res,
         }
     }
 
+  warn().printf("Create request for device address %u/0x%x\n", dev_addr,
+                dev_addr);
+
   if (!device_address_free(dev_addr))
     return -L4_EEXIST;
 
