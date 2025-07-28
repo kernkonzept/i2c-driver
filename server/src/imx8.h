@@ -26,6 +26,12 @@ static Dbg info() { return Dbg(Dbg::Info, "IMX8"); }
 static Dbg trace() { return Dbg(Dbg::Trace, "IMX8"); }
 
 
+/**
+ * Adapter class to manage the I2C controller's MMIO region.
+ *
+ * The `read` and `write` functions expect a class defining the constants
+ * `Offset` and `Write_mask`, as the `Reg_data` class does.
+ */
 struct Mmio_regs
 {
   L4drivers::Mmio_register_block<32> regs;
@@ -46,6 +52,15 @@ struct Mmio_regs
   }
 };
 
+/**
+ * Base class for I2C controller register.
+ *
+ * \tparam OFFS   Offset of the I2C controller register.
+ * \tparam WMASK  Bitmask of the writable bits in this register.
+ *
+ * This class defines the constants to use with `Mmio_regs::read()` and
+ * `Mmio_regs::write()`.
+ */
 template <unsigned OFFS, unsigned WMASK>
 struct Reg_data
 {
