@@ -23,11 +23,11 @@
 #include "imx8.h"
 
 // List of all supported controllers
-#ifdef CONFIG_RPI4
+#ifdef CONFIG_I2C_DRIVER_RPI4
 static Ctrl_bcm2835 __bcm2835;
 #endif
 
-#ifdef CONFIG_IMX8
+#ifdef CONFIG_I2C_DRIVER_IMX8
 static Imx8::Ctrl_imx8 __imx8;
 #endif
 

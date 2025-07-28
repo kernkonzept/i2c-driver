@@ -1,12 +1,12 @@
 menu "I2C driver"
 
-config RPI4
+config I2C_DRIVER_RPI4
 	bool "RPI4"
 	default y
 	help
 	  Include support for the Raspberry Pi 4 I2C controller.
 
-config IMX8
+config I2C_DRIVER_IMX8
 	bool "i.MX8"
 	default y
 	help
