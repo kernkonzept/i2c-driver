@@ -8,6 +8,7 @@
 #include <l4/sys/factory>
 #include <l4/sys/cxx/ipc_types>
 #include <l4/sys/cxx/ipc_epiface>
+#include <l4/cxx/minmax>
 #include <l4/re/util/object_registry>
 #include <l4/re/util/br_manager>
 #include <l4/l4virtio/server/virtio-i2c-device>
@@ -95,8 +96,19 @@ public:
   bool match(l4_uint16_t addr) const { return addr == _addr; }
 
 private:
+  static unsigned constexpr Utcb_mr_bytes =
+    L4_UTCB_GENERIC_DATA_SIZE * sizeof(l4_umword_t);
+
+  unsigned store_input_buffer(l4_uint8_t const *buf, unsigned len)
+  {
+    unsigned cpy_len = cxx::min(Utcb_mr_bytes, len);
+    memcpy(_input_buffer, buf, cpy_len);
+    return cpy_len;
+  }
+
   Controller_if *_ctrl;
   l4_uint16_t _addr; ///< 7-bit or 10-bit HW device address
+  l4_uint8_t _input_buffer[Utcb_mr_bytes];
 };
 
 long
@@ -119,9 +131,9 @@ long
 I2c_device::op_write(I2c_device_ops::Rights,
                      L4::Ipc::Array_ref<l4_uint8_t const> buf)
 {
-  std::vector<l4_uint8_t> buffer(buf.data, buf.data + buf.length);
+  unsigned length = store_input_buffer(buf.data, buf.length);
 
-  long err = _ctrl->write(_addr, &buffer.front(), buf.length);
+  long err = _ctrl->write(_addr, _input_buffer, length);
   return err;
 }
 
@@ -131,10 +143,10 @@ I2c_device::op_write_read(I2c_device_ops::Rights,
                           unsigned char len,
                           L4::Ipc::Array_ref<l4_uint8_t> &rbuf)
 {
-  std::vector<l4_uint8_t> wbuffer(wbuf.data, wbuf.data + wbuf.length);
+  unsigned length = store_input_buffer(wbuf.data, wbuf.length);
   std::vector<l4_uint8_t> rbuffer(len);
-  long err = _ctrl->write_read(_addr, &wbuffer.front(), wbuf.length,
-                               &rbuffer.front(), len);
+  long err =
+    _ctrl->write_read(_addr, _input_buffer, length, &rbuffer.front(), len);
 
   if (err < 0)
     return err;
