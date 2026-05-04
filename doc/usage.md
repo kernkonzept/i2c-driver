@@ -127,8 +127,8 @@ virtio_i2c@16000 {
   i2c {
     compatible = "virtio,device22";
 
-    #size-cells = <1>;
-    #address-cells = <0>;
+    #size-cells = <0>;
+    #address-cells = <1>;
 
     rtc@68 {
       compatible = "maxim,ds3231";
