@@ -3,6 +3,9 @@
 [comment]: # (This is a generated file. Do not change it.)
 [comment]: # (Instead, change capdb.yml.)
 
+
+## Description {#l4re_servers_i2c_driver_description}
+
 The I2C controller driver provides means to separate access to devices on a
 shared I2C bus to multiple clients. The assignment is static and assigned during
 the system configuration (ned script).
@@ -14,7 +17,8 @@ controller.
    - BCM2835, BCM2711
 
 
-## Capabilities
+<hr>
+## Capabilities {#l4re_servers_i2c_driver_capabilities}
 
 * `dev_factory`
 
@@ -24,7 +28,8 @@ controller.
   Mandatory capability.
 
 
-## Command Line Options
+<hr>
+## Command Line Options {#l4re_servers_i2c_driver_cmdline_options}
 
 I2C controller driver provides the following command line options:
 
@@ -43,7 +48,7 @@ I2C controller driver provides the following command line options:
 
   Flag. True if provided.
 
-## Virtio I2C device
+## Virtio I2C device {#l4re_servers_i2c_driver_param_virtio_i2c_device}
 
 The virtio-i2c-device interface allows for direct usage as a virtIO device. For
 example with uvmm's virtio-proxy a guest can directly access the device(s).
@@ -61,7 +66,7 @@ Each i2c device address can only be used once, each subsequent create call will
 return `-L4_EEXIST`.
 
 
-## I2C device
+## I2C device {#l4re_servers_i2c_driver_param_i2c_device}
 
 The i2c-device interface allows usage of an I2C device from an L4Re I2C driver
 via the RPC interface.
@@ -80,7 +85,8 @@ return `-L4_EEXIST`.
 
 
 
-## Examples
+<hr>
+## Examples {#l4re_servers_i2c_driver_examples}
 
 ### usage example for DS321 RTC device
 ```lua
